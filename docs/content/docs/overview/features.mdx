@@ -65,3 +65,11 @@ See [Third-party Prompt Sources](/docs/overview/third-party-prompt-repositories)
 - The project is frontend-first and does not provide built-in cloud accounts or cloud storage.
 - API keys remain in browser storage and requests are sent directly to configured providers.
 - Production Docker static-resource paths still require broader deployment verification.
+
+## Manju production nodes
+
+- Built-in `manju` plugin nodes for episodes, scenes, characters, shots, storyboards, style bibles, reviews, and exports.
+- Canvas Agent MCP tools for creating story structures, generating shot assets, updating shots, validating continuity, and exporting an episode manifest.
+- Horizontal `16:9` metadata is applied by default to new production nodes while the existing image and video generation flow remains available.
+- A shared generation request/task contract is available for a future company model gateway; the first adapter reuses the current browser-side model configuration.
+- Shot asset nodes inherit connected character, scene, and style constraints and record the source node IDs for traceability.

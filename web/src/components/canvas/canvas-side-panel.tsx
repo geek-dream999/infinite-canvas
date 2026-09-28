@@ -24,7 +24,7 @@ import type { InsertAssetPayload } from "./asset-picker-modal";
 const PANEL_MOTION_SECONDS = CANVAS_SIDE_PANEL_MOTION_MS / 1000;
 const PANEL_EASE = [0.22, 1, 0.36, 1] as const;
 
-type PanelTab = "canvas" | "assets" | "prompts";
+type PanelTab = "canvas" | "assets" | "prompts" | "production";
 
 type Props = {
     nodes: CanvasNodeData[];
@@ -103,20 +103,56 @@ export function CanvasSidePanel({ nodes, selectedNodeIds, onFocusNode, onPreview
                     <TabButton label={t("canvas.sidePanel.canvas")} active={tab === "canvas"} theme={theme} onClick={() => setTab("canvas")} />
                     <TabButton label={t("canvas.sidePanel.assets")} active={tab === "assets"} theme={theme} onClick={() => setTab("assets")} />
                     <TabButton label={t("canvas.sidePanel.prompts")} active={tab === "prompts"} theme={theme} onClick={() => setTab("prompts")} />
+                    <TabButton label="制作" active={tab === "production"} theme={theme} onClick={() => setTab("production")} />
                 </div>
                 <div className="mt-2 min-h-0 flex-1 overflow-hidden">
                     {tab === "canvas" ? (
                         <CanvasNodesTab nodes={nodes} selectedNodeIds={selectedNodeIds} onFocusNode={onFocusNode} onPreviewNode={onPreviewNode} theme={theme} />
                     ) : tab === "assets" ? (
                         <CanvasAssetsTab onInsert={onInsertAsset} theme={theme} />
-                    ) : (
+                    ) : tab === "prompts" ? (
                         <CanvasPromptsTab onInsert={onInsertAsset} theme={theme} />
+                    ) : (
+                        <ManjuProductionTab nodes={nodes} onFocusNode={onFocusNode} theme={theme} />
                     )}
                 </div>
                 <button type="button" className="absolute inset-y-0 right-0 z-40 w-4 translate-x-1/2 cursor-col-resize" onPointerDown={startResize} aria-label={t("canvas.sidePanel.resize")} />
             </motion.aside>
         </motion.div>
     );
+}
+
+function ManjuProductionTab({ nodes, onFocusNode, theme }: { nodes: CanvasNodeData[]; onFocusNode: (nodeId: string) => void; theme: CanvasTheme }) {
+    const shots = nodes.filter((node) => node.type === "manju:shot").sort((a, b) => Number(a.metadata?.shotNumber || 0) - Number(b.metadata?.shotNumber || 0));
+    const assets = nodes.filter((node) => node.metadata?.sourceShotId);
+    const completed = assets.filter((node) => node.metadata?.generationStatus === "succeeded").length;
+    const approved = shots.filter((node) => node.metadata?.reviewStatus === "approved").length;
+    return (
+        <div className="thin-scrollbar h-full overflow-y-auto p-4">
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <ProductionMetric label="镜头" value={shots.length} theme={theme} />
+                <ProductionMetric label="资产" value={`${completed}/${assets.length}`} theme={theme} />
+                <ProductionMetric label="审核" value={`${approved}/${shots.length}`} theme={theme} />
+            </div>
+            <div className="mt-4 space-y-2">
+                {shots.length ? shots.map((shot) => {
+                    const shotAssets = assets.filter((asset) => asset.metadata?.sourceShotId === shot.id);
+                    const done = shotAssets.length > 0 && shotAssets.every((asset) => asset.metadata?.generationStatus === "succeeded");
+                    const review = shot.metadata?.reviewStatus === "approved";
+                    return (
+                        <button key={shot.id} type="button" onClick={() => onFocusNode(shot.id)} className="w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-black/5" style={{ borderColor: theme.node.stroke }}>
+                            <div className="flex items-center justify-between gap-2 text-sm font-medium"><span className="truncate">镜头 {shot.metadata?.shotNumber || "—"} · {shot.title}</span><span className="shrink-0 text-[10px]" style={{ color: review && done ? "#16a34a" : "#d97706" }}>{review && done ? "可交付" : "待处理"}</span></div>
+                            <div className="mt-1 text-[11px]" style={{ color: theme.node.muted }}>{done ? "资产完成" : `资产 ${shotAssets.filter((asset) => asset.metadata?.generationStatus === "succeeded").length}/${shotAssets.length}`} · {review ? "已审核" : "未审核"}</div>
+                        </button>
+                    );
+                }) : <div className="py-8 text-center text-xs" style={{ color: theme.node.muted }}>尚未创建镜头</div>}
+            </div>
+        </div>
+    );
+}
+
+function ProductionMetric({ label, value, theme }: { label: string; value: number | string; theme: CanvasTheme }) {
+    return <div className="rounded-lg border px-2 py-2" style={{ borderColor: theme.node.stroke }}><div className="text-base font-semibold">{value}</div><div style={{ color: theme.node.muted }}>{label}</div></div>;
 }
 
 function TabButton({ label, active, theme, onClick }: { label: string; active: boolean; theme: CanvasTheme; onClick: () => void }) {

@@ -50,4 +50,17 @@ export default defineConfig({
         __APP_VERSION__: JSON.stringify(localVersion),
         __APP_RELEASES__: JSON.stringify(parseChangelog(localChangelog)),
     },
+    build: {
+        rollupOptions: {
+            output: {
+                manualChunks(id) {
+                    if (!id.includes("node_modules")) return;
+                    if (id.includes("@monaco-editor") || id.includes("monaco-editor")) return "editor";
+                    if (id.includes("@codemirror") || id.includes("codemirror")) return "editor";
+                    if (id.includes("@xyflow") || id.includes("reactflow")) return "canvas";
+                    return "vendor";
+                },
+            },
+        },
+    },
 });

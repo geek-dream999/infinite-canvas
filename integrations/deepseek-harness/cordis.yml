@@ -1,0 +1,15 @@
+# DeepSeek Harness overlay for Infinite Canvas MCP tools.
+# Start DSH with:
+#   npx @deepseek-ai/dsh web --patch /absolute/path/to/this/cordis.yml
+- insert:
+    - id: infinite-canvas-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: infinite-canvas
+        transport: stdio
+        command: node
+        args:
+          - /Users/liuyahui/codes/projects/infinite-canvas-company/canvas-agent/dist/index.js
+          - mcp
+        env: {}
+        cwd: /Users/liuyahui/codes/projects/infinite-canvas-company

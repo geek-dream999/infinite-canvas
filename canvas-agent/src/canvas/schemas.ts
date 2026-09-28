@@ -3,7 +3,7 @@ import { z } from "zod";
 const recordSchema = z.record(z.unknown());
 const positionSchema = z.object({ x: z.number(), y: z.number() });
 const viewportSchema = z.object({ x: z.number(), y: z.number(), k: z.number() });
-const nodeTypeSchema = z.enum(["image", "text", "config", "video", "audio"]);
+const nodeTypeSchema = z.string().min(1);
 const generationModeSchema = z.enum(["text", "image", "video", "audio"]);
 
 /** Canvas Agent 对外提供的工具名称。 */
@@ -12,6 +12,8 @@ export const toolNames = [
     "canvas_list_projects",
     "canvas_get_state",
     "canvas_get_selection",
+    "canvas_get_capabilities",
+    "canvas_get_protocol_info",
     "canvas_export_snapshot",
     "canvas_apply_ops",
     "canvas_create_node",
@@ -42,6 +44,17 @@ export const toolNames = [
     "prompts_search",
     "assets_list",
     "assets_add",
+    "story_create_episode",
+    "story_parse_script",
+    "story_create_characters",
+    "story_create_scenes",
+    "story_create_storyboard",
+    "story_validate_continuity",
+    "story_generate_shot_assets",
+    "story_update_shot",
+    "story_review_shot",
+    "story_get_project_status",
+    "story_export_episode",
 ] as const;
 export type ToolName = (typeof toolNames)[number];
 
@@ -94,6 +107,8 @@ export const toolInputSchemas = {
     canvas_list_projects: z.object({ keyword: z.string().optional(), page: z.number().optional(), pageSize: z.number().optional() }),
     canvas_get_state: z.object({}).passthrough(),
     canvas_get_selection: z.object({}).passthrough(),
+    canvas_get_capabilities: z.object({}).passthrough(),
+    canvas_get_protocol_info: z.object({}).passthrough(),
     canvas_export_snapshot: z.object({}).passthrough(),
     canvas_apply_ops: z.object({ ops: z.array(canvasOpSchema) }),
     canvas_create_node: z.object({ nodeType: nodeTypeSchema, title: z.string().optional(), x: z.number().optional(), y: z.number().optional(), width: z.number().optional(), height: z.number().optional(), metadata: recordSchema.optional() }),
@@ -124,6 +139,17 @@ export const toolInputSchemas = {
     prompts_search: z.object({ keyword: z.string().optional(), category: z.string().optional(), tags: z.array(z.string()).optional(), page: z.number().optional(), pageSize: z.number().optional() }),
     assets_list: z.object({ kind: z.enum(["all", "text", "image", "video"]).optional(), keyword: z.string().optional(), page: z.number().optional(), pageSize: z.number().optional() }),
     assets_add: z.object({ kind: z.enum(["text", "image"]), title: z.string(), content: z.string().optional(), imageUrl: z.string().optional(), tags: z.array(z.string()).optional(), source: z.string().optional(), note: z.string().optional() }),
+    story_create_episode: z.object({ title: z.string(), episodeNumber: z.number().optional(), script: z.string().optional(), aspectRatio: z.string().optional() }),
+    story_parse_script: z.object({ script: z.string().min(1), episodeNodeId: z.string().optional() }),
+    story_create_characters: z.object({ characters: z.array(z.object({ name: z.string(), description: z.string().optional(), references: z.array(z.string()).optional() })).min(1), episodeNodeId: z.string().optional(), x: z.number().optional(), y: z.number().optional() }),
+    story_create_scenes: z.object({ scenes: z.array(z.object({ name: z.string(), location: z.string().optional(), timeOfDay: z.string().optional(), mood: z.string().optional(), continuity: z.array(z.string()).optional() })).min(1), episodeNodeId: z.string().optional(), x: z.number().optional(), y: z.number().optional() }),
+    story_create_storyboard: z.object({ shots: z.array(z.object({ shotNumber: z.number(), description: z.string(), shotSize: z.string().optional(), camera: z.string().optional(), movement: z.string().optional(), durationSeconds: z.number().optional(), dialogue: z.string().optional() })).min(1), sceneNodeId: z.string().optional(), x: z.number().optional(), y: z.number().optional() }),
+    story_validate_continuity: z.object({ nodeIds: z.array(z.string()).optional() }),
+    story_generate_shot_assets: z.object({ shotNodeIds: z.array(z.string()).min(1), kinds: z.array(z.enum(["image", "video", "audio"])).optional() }),
+    story_update_shot: z.object({ id: z.string(), patch: recordSchema }),
+    story_review_shot: z.object({ id: z.string(), status: z.enum(["pending", "approved", "changes_requested"]), notes: z.array(z.string()).optional() }),
+    story_get_project_status: z.object({ episodeNodeId: z.string().optional() }),
+    story_export_episode: z.object({ episodeNodeId: z.string().optional(), format: z.enum(["json", "manifest"]).optional() }),
 } satisfies Record<ToolName, z.AnyZodObject>;
 
 export const toolDescriptions: Record<ToolName, string> = {
@@ -131,6 +157,8 @@ export const toolDescriptions: Record<ToolName, string> = {
     canvas_list_projects: "列出用户全部画布（仅标题、创建/更新时间、节点数、连线数，不含完整数据），支持 keyword 搜索和 page/pageSize 分页。返回的 id 可配合 site_navigate 跳转到 /canvas/:id 打开对应画布。",
     canvas_get_state: "读取当前网页画布的节点、连线、选区和视口。",
     canvas_get_selection: "读取当前网页画布选中的节点。",
+    canvas_get_capabilities: "读取当前无限画布协议、节点类型、生成能力和可用传输方式。",
+    canvas_get_protocol_info: "读取无限画布的 Agent 无关协议版本和连接约束。",
     canvas_export_snapshot: "导出当前画布快照，用于理解布局。",
     canvas_apply_ops: "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。",
     canvas_create_node: "创建任意类型节点：text、image、config、video、audio。适合创建占位图、媒体占位、配置节点或自定义 metadata 节点。",
@@ -161,4 +189,15 @@ export const toolDescriptions: Record<ToolName, string> = {
     prompts_search: "搜索提示词库（第三方提示词合集），支持 keyword、category、tags 过滤和 page/pageSize 分页，返回标题、提示词、分类、标签、封面等。",
     assets_list: "列出用户「我的素材」，支持 kind（text/image/video）过滤、keyword 搜索和 page/pageSize 分页。为控制体积不返回图片/视频原始 data，仅返回封面与元信息。",
     assets_add: "向「我的素材」新增素材。kind=text 时用 content 传文本内容；kind=image 时用 imageUrl 传图片地址或 dataURL。可附带 title、tags、source、note。",
+    story_create_episode: "创建漫剧剧集节点，可附带单集剧本、集数和横屏画幅。",
+    story_parse_script: "将剧本解析为可继续编辑的场景、角色和镜头生产结构。",
+    story_create_characters: "批量创建漫剧角色设定节点。",
+    story_create_scenes: "批量创建漫剧场景设定节点。",
+    story_create_storyboard: "批量创建镜头节点并生成分镜结构。",
+    story_validate_continuity: "检查当前漫剧节点图谱的角色、场景、提示词和镜头依赖缺失。",
+    story_generate_shot_assets: "为指定镜头创建图片、视频或音频生成流程。",
+    story_update_shot: "更新指定镜头的景别、机位、动作、对白或连续性信息。",
+    story_review_shot: "写入镜头审核状态和审核意见。",
+    story_get_project_status: "读取当前漫剧项目的剧集、场景、角色、镜头、资产、审核和导出准备度汇总。",
+    story_export_episode: "导出单集漫剧的结构化生产清单或 JSON manifest。",
 };

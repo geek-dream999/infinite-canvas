@@ -1,0 +1,20 @@
+{
+  "providers": [
+    {
+      "id": "supertoken",
+      "kind": ["video"],
+      "baseUrl": "https://api.supertoken.cc/v1",
+      "apiKeyEnv": "SUPERTOKEN_VIDEO_API_KEY",
+      "models": {
+        "video": "adobe-seedance-2.0-fast-720p"
+      },
+      "priority": 100,
+      "enabled": true
+    }
+  ],
+  "defaults": {
+    "aspectRatio": "16:9",
+    "maxRetries": 2,
+    "timeoutSeconds": 300
+  }
+}

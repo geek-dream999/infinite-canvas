@@ -67,7 +67,124 @@ export function buildCanvasToolRequest(name: ToolName, input: Record<string, unk
         const data = input as { nodeId: string; mode?: string; prompt?: string };
         return applyOps([runGenerationOp(data.nodeId, generationMode(data.mode), data.prompt)]);
     }
+    if (name === "story_create_episode") return applyOps(storyCreateEpisodeOps(input));
+    if (name === "story_parse_script") return applyOps(storyParseScriptOps(input, state));
+    if (name === "story_create_characters") return applyOps(storyCreateCharactersOps(input));
+    if (name === "story_create_scenes") return applyOps(storyCreateScenesOps(input));
+    if (name === "story_create_storyboard") return applyOps(storyCreateStoryboardOps(input));
+    if (name === "story_update_shot") return applyOps([{ type: "update_node", id: String(input.id), metadata: { ...(input.patch as Record<string, unknown>), version: Date.now() } }]);
+    if (name === "story_review_shot") return applyOps([{ type: "update_node", id: String(input.id), metadata: { reviewStatus: input.status, reviewNotes: input.notes || [], version: Date.now() } }]);
+    if (name === "story_generate_shot_assets") return applyOps(storyGenerateShotAssetsOps(input, state));
     throw new Error(`未知工具：${name}`);
+}
+
+function storyCreateEpisodeOps(input: Record<string, unknown>) {
+    const id = `episode-${crypto.randomUUID()}`;
+    const title = String(input.title || "未命名剧集");
+    return [{ type: "add_node", id, nodeType: "manju:episode", title, position: { x: Number(input.x || 0), y: Number(input.y || 0) }, metadata: { content: input.script || "", episodeNumber: input.episodeNumber || 1, aspectRatio: input.aspectRatio || "16:9", status: "idle", version: 1 } }];
+}
+
+function storyParseScriptOps(input: Record<string, unknown>, state: CanvasSnapshot | null) {
+    const script = String(input.script || "");
+    const lines = script.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+    const x = nextCanvasX(state);
+    const aspectRatio = String((state?.nodes || []).find((node) => node.id === input.episodeNodeId)?.metadata?.aspectRatio || "16:9");
+    const ops: unknown[] = [];
+    let sceneId = "";
+    let shotNumber = 0;
+    // A short script often has no explicit SCENE heading. Keep the graph
+    // connected by materializing one inferred scene instead of leaving shots
+    // orphaned outside the selected episode.
+    if (input.episodeNodeId && !lines.some((line) => /^(?:场景|SCENE)\s*[:：-]?\s*.+$/i.test(line))) {
+        sceneId = `scene-${crypto.randomUUID()}`;
+        ops.push({ type: "add_node", id: sceneId, nodeType: "manju:scene", title: "默认场景", position: { x, y: -360 }, metadata: { content: "从剧本自动推断的场景", location: "待确认", aspectRatio, version: 1, status: "idle" } });
+        ops.push({ type: "connect_nodes", fromNodeId: String(input.episodeNodeId), toNodeId: sceneId });
+    }
+    lines.forEach((line, index) => {
+        const sceneMatch = line.match(/^(?:场景|SCENE)\s*[:：-]?\s*(.+)$/i);
+        if (sceneMatch) {
+            sceneId = `scene-${crypto.randomUUID()}`;
+            ops.push({ type: "add_node", id: sceneId, nodeType: "manju:scene", title: sceneMatch[1], position: { x, y: index * 360 }, metadata: { content: sceneMatch[1], location: sceneMatch[1], aspectRatio, version: 1, status: "idle" } });
+            if (input.episodeNodeId) ops.push({ type: "connect_nodes", fromNodeId: String(input.episodeNodeId), toNodeId: sceneId });
+            return;
+        }
+        shotNumber += 1;
+        const shotId = `shot-${crypto.randomUUID()}`;
+        ops.push({ type: "add_node", id: shotId, nodeType: "manju:shot", title: `镜头 ${shotNumber}`, position: { x: x + 420, y: index * 360 }, metadata: { content: line, shotNumber, durationSeconds: 4, aspectRatio, version: 1, status: "idle" } });
+        if (sceneId) ops.push({ type: "connect_nodes", fromNodeId: sceneId, toNodeId: shotId });
+        else if (input.episodeNodeId) ops.push({ type: "connect_nodes", fromNodeId: String(input.episodeNodeId), toNodeId: shotId });
+    });
+    return ops;
+}
+
+function storyCreateCharactersOps(input: Record<string, unknown>) {
+    const ops: unknown[] = [];
+    ((input.characters || []) as Array<Record<string, unknown>>).forEach((item, index) => {
+        const id = `character-${crypto.randomUUID()}`;
+        ops.push({ type: "add_node", id, nodeType: "manju:character", title: String(item.name), position: { x: Number(input.x || 0), y: Number(input.y || 0) + index * 280 }, metadata: { content: item.description || "", references: item.references || [], version: 1, status: "idle" } });
+        if (input.episodeNodeId) ops.push({ type: "connect_nodes", fromNodeId: String(input.episodeNodeId), toNodeId: id });
+    });
+    return ops;
+}
+
+function storyCreateScenesOps(input: Record<string, unknown>) {
+    const ops: unknown[] = [];
+    ((input.scenes || []) as Array<Record<string, unknown>>).forEach((item, index) => {
+        const id = `scene-${crypto.randomUUID()}`;
+        ops.push({ type: "add_node", id, nodeType: "manju:scene", title: String(item.name), position: { x: Number(input.x || 0), y: Number(input.y || 0) + index * 260 }, metadata: { content: item.location || "", location: item.location, timeOfDay: item.timeOfDay, mood: item.mood, continuity: item.continuity || [], version: 1, status: "idle" } });
+        if (input.episodeNodeId) ops.push({ type: "connect_nodes", fromNodeId: String(input.episodeNodeId), toNodeId: id });
+    });
+    return ops;
+}
+
+function storyCreateStoryboardOps(input: Record<string, unknown>) {
+    const ops: unknown[] = [];
+    ((input.shots || []) as Array<Record<string, unknown>>).forEach((item, index) => {
+        const id = `shot-${crypto.randomUUID()}`;
+        ops.push({ type: "add_node", id, nodeType: "manju:shot", title: `镜头 ${item.shotNumber || index + 1}`, position: { x: Number(input.x || 0), y: Number(input.y || 0) + index * 320 }, metadata: { content: item.description, shotNumber: item.shotNumber, shotSize: item.shotSize, camera: item.camera, movement: item.movement, durationSeconds: item.durationSeconds || 4, dialogue: item.dialogue, aspectRatio: "16:9", version: 1, status: "idle" } });
+        if (input.sceneNodeId) ops.push({ type: "connect_nodes", fromNodeId: String(input.sceneNodeId), toNodeId: id });
+    });
+    return ops;
+}
+
+function storyGenerateShotAssetsOps(input: Record<string, unknown>, state: CanvasSnapshot | null) {
+    const kinds = (input.kinds as string[] | undefined) || ["image", "video", "audio"];
+    const shots = new Set((input.shotNodeIds as string[]) || []);
+    const ops: unknown[] = [];
+    for (const shot of (state?.nodes || []).filter((node) => shots.has(node.id))) {
+        const inherited = collectShotConstraints(shot.id, state);
+        const taskIds: string[] = [];
+        const prompt = [String(shot.metadata?.content || shot.title), ...inherited.constraints].filter(Boolean).join("\n");
+        kinds.forEach((kind, index) => {
+            const id = `${kind}-${crypto.randomUUID()}`;
+            const generationTaskId = `generation-${crypto.randomUUID()}`;
+            taskIds.push(generationTaskId);
+            ops.push({ type: "add_node", id, nodeType: kind, title: `${shot.title}·${kind}`, position: { x: shot.position.x + 460, y: shot.position.y + index * 260 }, metadata: { prompt, generationMode: kind, sourceShotId: shot.id, inheritedNodeIds: inherited.nodeIds, aspectRatio: shot.metadata?.aspectRatio || "16:9", status: "queued", generationStatus: "queued", generationTaskId, generationVersion: 1, provider: "local" } });
+            ops.push({ type: "connect_nodes", fromNodeId: shot.id, toNodeId: id });
+            ops.push({ type: "run_generation", nodeId: id, mode: kind, prompt });
+        });
+        ops.push({ type: "update_node", id: shot.id, metadata: { assetTaskIds: taskIds, generationStatus: "queued", generationVersion: Number(shot.metadata?.version || 1) + 1 } });
+    }
+    return ops;
+}
+
+function collectShotConstraints(shotId: string, state: CanvasSnapshot | null) {
+    const nodes = state?.nodes || [];
+    const connections = state?.connections || [];
+    const incoming = connections.filter((connection) => connection.toNodeId === shotId).map((connection) => nodes.find((node) => node.id === connection.fromNodeId)).filter((node): node is CanvasNode => Boolean(node));
+    const nodeIds: string[] = [];
+    const constraints: string[] = [];
+    incoming.forEach((node) => {
+        const metadata = node.metadata || {};
+        const content = String(metadata.content || "").trim();
+        const continuity = Array.isArray(metadata.continuity) ? metadata.continuity.map(String) : [];
+        const label = node.type === "manju:character" ? "角色设定" : node.type === "manju:scene" ? "场景设定" : node.type === "manju:style-bible" ? "风格设定" : "上游设定";
+        if (content || metadata.location || continuity.length) {
+            nodeIds.push(node.id);
+            constraints.push(`${label}：${[content, metadata.location, metadata.timeOfDay, metadata.mood, ...continuity].filter(Boolean).join("；")}`);
+        }
+    });
+    return { nodeIds, constraints };
 }
 
 /** 按最大边限制计算附件图片节点尺寸，并保持原始比例。 */

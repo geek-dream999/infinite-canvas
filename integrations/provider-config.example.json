@@ -1,0 +1,36 @@
+{
+  "providers": [
+    {
+      "id": "supertoken-video",
+      "kind": ["video"],
+      "baseUrl": "https://api.supertoken.cc/v1",
+      "apiKeyEnv": "SUPERTOKEN_VIDEO_API_KEY",
+      "models": { "video": "adobe-seedance-2.0-fast-720p" },
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "id": "supertoken-image",
+      "kind": ["image"],
+      "baseUrl": "https://api.supertoken.cc/v1",
+      "apiKeyEnv": "SUPERTOKEN_IMAGE_API_KEY",
+      "models": { "image": "gpt-image-2" },
+      "priority": 90,
+      "enabled": true
+    },
+    {
+      "id": "supertoken-text",
+      "kind": ["text"],
+      "baseUrl": "https://api.supertoken.cc/v1",
+      "apiKeyEnv": "SUPERTOKEN_TEXT_API_KEY",
+      "models": { "text": "gpt-5.5" },
+      "priority": 80,
+      "enabled": true
+    }
+  ],
+  "defaults": {
+    "aspectRatio": "16:9",
+    "maxRetries": 2,
+    "timeoutSeconds": 180
+  }
+}

@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
+import { createOpenAICompatibleGenerationProvider } from "@/services/api/generation-gateway";
 import { createVideoGenerationTask, isVideoTaskFailed, storeGeneratedVideo, waitForVideoGenerationTask } from "@/services/api/video";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { ensureImagePreview, uploadImage } from "@/services/image-storage";
@@ -141,6 +142,27 @@ function applyGeneratedVideo(item: CanvasNodeData, video: UploadedFile, extra: C
         position: { x: item.position.x + item.width / 2 - videoSize.width / 2, y: item.position.y + item.height / 2 - videoSize.height / 2 },
         metadata: { ...item.metadata, ...videoMetadata(video), ...extra },
     };
+}
+
+async function requestCanvasAudioGeneration(config: typeof defaultConfig, prompt: string, signal?: AbortSignal): Promise<Blob> {
+    if (config.apiFormat !== "openai") return requestAudioGeneration(config, prompt, { signal });
+    const provider = createOpenAICompatibleGenerationProvider({
+        id: "configured-openai",
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        models: { audio: config.audioModel || config.model },
+    });
+    const task = await provider.submit({
+        kind: "audio",
+        model: config.audioModel || config.model,
+        prompt,
+        parameters: { voice: config.audioVoice, format: config.audioFormat, speed: config.audioSpeed, instructions: config.audioInstructions },
+        signal,
+    });
+    if (task.status === "failed" || !task.result?.url) throw new Error(task.error || "Audio generation failed");
+    const response = await fetch(task.result.url, { signal });
+    if (!response.ok) throw new Error(`Audio result download failed: ${response.status}`);
+    return await response.blob();
 }
 
 export default function CanvasPage() {
@@ -303,6 +325,26 @@ function InfiniteCanvasPage() {
     const finishGenerationRequest = useCallback((targetNodeId: string, controller: AbortController) => {
         const request = generationRequestsRef.current.get(targetNodeId);
         if (request?.controller === controller) generationRequestsRef.current.delete(targetNodeId);
+    }, []);
+
+    const reconcileShotGenerationStatus = useCallback((assetNodeId: string, statusOverride?: NonNullable<CanvasNodeData["metadata"]>["generationStatus"]) => {
+        setNodes((prev) => {
+            const asset = prev.find((node) => node.id === assetNodeId);
+            const shotId = asset?.metadata?.sourceShotId;
+            if (!shotId) return prev;
+            const next = statusOverride ? prev.map((node) => (node.id === assetNodeId ? { ...node, metadata: { ...node.metadata, generationStatus: statusOverride } } : node)) : prev;
+            const shotAssets = next.filter((node) => node.metadata?.sourceShotId === shotId);
+            if (!shotAssets.length) return prev;
+            const status = shotAssets.some((node) => node.metadata?.generationStatus === "failed")
+                ? "failed"
+                : shotAssets.some((node) => node.metadata?.generationStatus === "queued" || node.metadata?.generationStatus === "running")
+                  ? "running"
+                  : shotAssets.every((node) => node.metadata?.generationStatus === "succeeded")
+                    ? "succeeded"
+                    : undefined;
+            if (!status) return prev;
+            return next.map((node) => (node.id === shotId ? { ...node, metadata: { ...node.metadata, generationStatus: status } } : node));
+        });
     }, []);
 
     const completeVideoNodeTask = useCallback(
@@ -2364,7 +2406,7 @@ function InfiniteCanvasPage() {
                 return;
             }
             let pendingChildIds: string[] = [];
-            if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...(node.type === CanvasNodeType.Config ? {} : { prompt }), status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
+            if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...(node.type === CanvasNodeType.Config ? {} : { prompt }), status: NODE_STATUS_LOADING, ...(node.metadata?.generationTaskId ? { generationStatus: "running" } : {}), errorDetails: undefined } } : node)));
 
             try {
                 if (mode === "image") {
@@ -2396,6 +2438,7 @@ function InfiniteCanvasPage() {
                         width: isEmptyImageNode ? sourceNode?.width || imageConfig.width : imageConfig.width,
                         height: isEmptyImageNode ? sourceNode?.height || imageConfig.height : imageConfig.height,
                         metadata: {
+                            ...(isEmptyImageNode ? sourceNode?.metadata : {}),
                             prompt: effectivePrompt,
                             status: NODE_STATUS_LOADING,
                             images: imageIds.map((id) => ({ id, status: NODE_STATUS_LOADING, content: "", naturalWidth: 0, naturalHeight: 0, bytes: 0, mimeType: "" })),
@@ -2505,10 +2548,11 @@ function InfiniteCanvasPage() {
                             node.id === nodeId && isConfigNode
                                 ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : t("canvas.projectPage.generationFailed") } }
                                 : node.id === rootId
-                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, errorDetails: hasSuccess ? undefined : t("canvas.projectPage.allFailed") } }
+                                  ? { ...node, metadata: { ...node.metadata, status: hasSuccess ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR, ...(node.metadata?.generationTaskId ? { generationStatus: hasSuccess ? "succeeded" : "failed", ...(hasSuccess ? { generationCompletedAt: new Date().toISOString(), generationVersion: Number(node.metadata?.generationVersion || 1) + 1 } : {}) } : {}), errorDetails: hasSuccess ? undefined : t("canvas.projectPage.allFailed") } }
                                     : node,
                         ),
                     );
+                    reconcileShotGenerationStatus(rootId, hasFailure ? "failed" : "succeeded");
                     return;
                 }
 
@@ -2525,6 +2569,7 @@ function InfiniteCanvasPage() {
                         width: isEmptyVideoNode ? sourceNode.width : spec.width,
                         height: isEmptyVideoNode ? sourceNode.height : spec.height,
                         metadata: {
+                            ...(isEmptyVideoNode ? sourceNode?.metadata : {}),
                             prompt: effectivePrompt,
                             status: NODE_STATUS_LOADING,
                             model: generationConfig.model,
@@ -2555,6 +2600,8 @@ function InfiniteCanvasPage() {
                             videoMode: generationConfig.videoMode,
                             references: generationReferenceUrls(generationContext),
                         }, generationContext.referenceVideos, generationContext.referenceAudios);
+                        setNodes((prev) => prev.map((node) => (node.id === videoId ? { ...node, metadata: { ...node.metadata, generationStatus: "succeeded", generationCompletedAt: new Date().toISOString(), generationVersion: Number(node.metadata?.generationVersion || 1) + 1 } } : node)));
+                        reconcileShotGenerationStatus(videoId, "succeeded");
                     } finally {
                         finishGenerationRequest(videoId, controller);
                     }
@@ -2573,7 +2620,7 @@ function InfiniteCanvasPage() {
                         position: isEmptyAudioNode ? sourceNode.position : { x: parent.x + (sourceNode?.width || spec.width) + 96, y: parent.y + ((sourceNode?.height || spec.height) - spec.height) / 2 },
                         width: isEmptyAudioNode ? sourceNode.width : spec.width,
                         height: isEmptyAudioNode ? sourceNode.height : spec.height,
-                        metadata: { prompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig) },
+                        metadata: { ...(isEmptyAudioNode ? sourceNode?.metadata : {}), prompt: effectivePrompt, status: NODE_STATUS_LOADING, ...buildAudioGenerationMetadata(generationConfig) },
                     };
                     pendingChildIds = [audioId];
                     setNodes((prev) =>
@@ -2584,8 +2631,9 @@ function InfiniteCanvasPage() {
                     if (!isEmptyAudioNode) setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: nodeId, toNodeId: audioId }]);
                     const controller = startGenerationRequest(audioId, nodeId, nodeId, runController);
                     try {
-                        const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, effectivePrompt, { signal: controller.signal }), generationConfig.audioFormat);
-                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig) } } : node)));
+                        const audio = await storeGeneratedAudio(await requestCanvasAudioGeneration(generationConfig, effectivePrompt, controller.signal), generationConfig.audioFormat);
+                        setNodes((prev) => prev.map((node) => (node.id === audioId ? { ...node, metadata: { ...node.metadata, ...audioMetadata(audio), prompt: effectivePrompt, ...buildAudioGenerationMetadata(generationConfig), generationStatus: "succeeded", generationCompletedAt: new Date().toISOString(), generationVersion: Number(node.metadata?.generationVersion || 1) + 1 } } : node)));
+                        reconcileShotGenerationStatus(audioId, "succeeded");
                     } finally {
                         finishGenerationRequest(audioId, controller);
                     }
@@ -2699,6 +2747,7 @@ function InfiniteCanvasPage() {
                                     texts: completedTexts,
                                     primaryTextId: primaryText?.id,
                                     status: primaryText ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR,
+                                    ...(node.metadata?.generationTaskId ? { generationStatus: primaryText ? "succeeded" : "failed", ...(primaryText ? { generationCompletedAt: new Date().toISOString(), generationVersion: Number(node.metadata?.generationVersion || 1) + 1 } : {}) } : {}),
                                     errorDetails: primaryText ? undefined : t("canvas.projectPage.generationFailed"),
                                 },
                             };
@@ -2720,19 +2769,21 @@ function InfiniteCanvasPage() {
                                       metadata: {
                                           ...node.metadata,
                                           status: NODE_STATUS_ERROR,
+                                          ...(node.metadata?.generationTaskId ? { generationStatus: "failed" } : {}),
                                           errorDetails,
                                           ...(isVideoTaskFailed(error) && node.type === CanvasNodeType.Video ? { videoTaskId: undefined } : {}),
                                       },
                                   }
-                            : node,
+                        : node,
                     ),
                 );
+                pendingChildIds.forEach((childId) => reconcileShotGenerationStatus(childId, "failed"));
             } finally {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, reconcileShotGenerationStatus, startGenerationRequest, t],
     );
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
@@ -2812,7 +2863,7 @@ function InfiniteCanvasPage() {
                     return;
                 }
                 if (node.type === CanvasNodeType.Audio) {
-                    const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, prompt, { signal: controller.signal }), generationConfig.audioFormat);
+                    const audio = await storeGeneratedAudio(await requestCanvasAudioGeneration(generationConfig, prompt, controller.signal), generationConfig.audioFormat);
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
                     return;
                 }
@@ -2889,7 +2940,7 @@ function InfiniteCanvasPage() {
                 setRunningNodeId(null);
             }
         },
-        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, startGenerationRequest, t],
+        [completeVideoNodeTask, effectiveConfig, finishGenerationRequest, isAiConfigReady, message, openConfigDialog, pollVideoNodeTask, reconcileShotGenerationStatus, startGenerationRequest, t],
     );
 
     const deleteBatchImage = useCallback((nodeId: string, imageId: string) => {

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "infinite-canvas": {
+      "url": "http://127.0.0.1:8787/mcp",
+      "headers": {
+        "x-canvas-agent-token": "<token from ~/.infinite-canvas/canvas-agent.json>"
+      }
+    }
+  }
+}

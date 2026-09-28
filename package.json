@@ -1,0 +1,15 @@
+{
+  "name": "infinite-canvas-company-platform",
+  "private": true,
+  "scripts": {
+    "platform": "node scripts/start-platform.mjs",
+    "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "verify:provider": "node scripts/verify-provider.mjs",
+    "compose:episode": "node scripts/compose-episode.mjs",
+    "test": "npm run test:agent && npm run typecheck:web",
+    "test:agent": "npm --prefix canvas-agent test",
+    "test:web": "npm --prefix web test",
+    "typecheck:web": "npm --prefix web run typecheck",
+    "build:web": "npm --prefix web run build"
+  }
+}

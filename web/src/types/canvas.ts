@@ -45,6 +45,27 @@ export type CanvasNodeText = {
 };
 
 export type CanvasNodeMetadata = {
+    projectId?: string;
+    version?: number;
+    episodeNumber?: number;
+    sceneNumber?: number;
+    shotNumber?: number;
+    aspectRatio?: string;
+    script?: string;
+    characters?: string[];
+    location?: string;
+    timeOfDay?: string;
+    mood?: string;
+    continuity?: string[];
+    shotSize?: string;
+    camera?: string;
+    movement?: string;
+    durationSeconds?: number;
+    dialogue?: string;
+    soundDesign?: string;
+    reviewStatus?: "pending" | "approved" | "changes_requested";
+    reviewNotes?: string[];
+    exportFormat?: string;
     content?: string;
     composerContent?: string;
     prompt?: string;
@@ -53,6 +74,14 @@ export type CanvasNodeMetadata = {
     fontSize?: number;
     generationMode?: CanvasGenerationMode;
     generationType?: CanvasImageGenerationType;
+    generationTaskId?: string;
+    sourceShotId?: string;
+    provider?: string;
+    inheritedNodeIds?: string[];
+    assetTaskIds?: string[];
+    generationStatus?: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+    generationVersion?: number;
+    generationCompletedAt?: string;
     model?: string;
     reasoningEffort?: "auto" | "low" | "medium" | "high" | "xhigh";
     size?: string;

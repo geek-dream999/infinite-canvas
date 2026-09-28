@@ -146,6 +146,25 @@ test("生成状态查询由当前激活网页返回", async (t) => {
     assert.deepEqual(await result, { total: 1, tasks: [{ id: "image-1", status: "running" }] });
 });
 
+test("图片下载请求由当前激活网页执行", async (t) => {
+    const session = new CanvasSession();
+    const first = connect(session, "first");
+    const second = connect(session, "second");
+    t.after(() => {
+        first.close();
+        second.close();
+    });
+    session.activateClient("second");
+
+    const result = session.callTool("canvas_download_images", { scope: "storyboard", fileName: "第一集分镜" });
+    const call = second.event("tool_call");
+    assert.equal(first.event("tool_call"), undefined);
+    assert.equal(field(call, "name"), "canvas_download_images");
+    assert.deepEqual(field(call, "input"), { scope: "storyboard", fileName: "第一集分镜" });
+    session.resolveResult("second", { requestId: String(field(call, "requestId")), result: { ok: true, count: 14, fileName: "第一集分镜.zip" } });
+    assert.deepEqual(await result, { ok: true, count: 14, fileName: "第一集分镜.zip" });
+});
+
 test("活动网页关闭后回退到仍连接的画布", async (t) => {
     const session = new CanvasSession();
     const first = connect(session, "first");
@@ -221,7 +240,7 @@ test("new clients receive the current Codex state and later updates", (t) => {
     t.after(() => client.close());
 
     const hello = client.event("hello");
-    assert.equal(field(hello, "protocolVersion"), 6);
+    assert.equal(field(hello, "protocolVersion"), 7);
     assert.deepEqual(field(hello, "workspace"), { activeThreadId: "thread-2" });
     assert.deepEqual(field(hello, "conversation"), { revision: 1, conversationId: "thread-2", threadId: "thread-2", status: "ready", mcpStatuses: {} });
     assert.deepEqual(field(hello, "codex"), { busy: true, threadId: "thread-2", turnId: "turn-1" });

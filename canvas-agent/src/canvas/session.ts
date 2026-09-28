@@ -7,6 +7,7 @@ import { buildCanvasToolRequest, fitAttachmentNodeSize } from "./operations.js";
 import type { ToolName } from "./schemas.js";
 import { compactCanvasState, compactNode, isToolName, nextCanvasX, parseToolInput } from "./tools.js";
 import type { CanvasSnapshot } from "./types.js";
+import { canvasCapabilities, CANVAS_PROTOCOL_VERSION } from "./protocol.js";
 
 type PendingRequest = { clientId: string; resolve: (value: unknown) => void; reject: (error: Error) => void };
 type TurnAttachment = { clientId: string; id: string; name: string; type: string; size: number; width: number; height: number; dataUrl: string };
@@ -23,11 +24,12 @@ export type ConversationState = {
     error?: string;
 };
 type McpInventoryItem = { name: string; authStatus?: string };
-export const AGENT_PROTOCOL_VERSION = 6;
+export const AGENT_PROTOCOL_VERSION = 7;
 
 const SITE_TOOLS = new Set<ToolName>([
     "site_navigate",
     "canvas_list_projects",
+    "canvas_download_images",
     "workbench_image_get_config",
     "workbench_image_generate",
     "workbench_video_get_config",
@@ -447,11 +449,16 @@ export class CanvasSession {
         }
         const readTool = ["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"].includes(name);
         if (readTool && (!this.clients.size || !this.canvasState)) throw new Error("当前没有已连接画布");
+        if (name === "canvas_get_capabilities") return canvasCapabilities((this.canvasState?.nodes || []).map((node) => node.type).filter((type, index, list) => list.indexOf(type) === index));
+        if (name === "canvas_get_protocol_info") return { protocolVersion: CANVAS_PROTOCOL_VERSION, agentNeutral: true, confirmationRequired: true, stateAuthority: "browser-canvas", transport: ["stdio", "streamable-http"], httpEndpoint: "/mcp" };
         if (name === "canvas_get_state" || name === "canvas_export_snapshot") return compactCanvasState(this.canvasState);
         if (name === "canvas_get_selection") {
             const ids = new Set(this.canvasState?.selectedNodeIds || []);
             return { nodes: (this.canvasState?.nodes || []).filter((node) => ids.has(node.id)).map(compactNode) };
         }
+        if (name === "story_validate_continuity") return validateStoryContinuity(this.canvasState, input as { nodeIds?: string[] });
+        if (name === "story_get_project_status") return getStoryProjectStatus(this.canvasState, input as { episodeNodeId?: string });
+        if (name === "story_export_episode") return exportStoryEpisode(this.canvasState, input as { episodeNodeId?: string; format?: string });
         if (name === "canvas_create_attachment_nodes") return await this.createAttachmentNodes(input as { attachmentIds: string[]; x?: number; y?: number; gap?: number; direction?: "row" | "column" });
         if (!this.clients.size) throw new Error("当前没有已连接画布");
         const request = buildCanvasToolRequest(name, input, this.canvasState);
@@ -502,6 +509,93 @@ export class CanvasSession {
             this.pending.set(requestId, { clientId, resolve: (value) => (clearTimeout(timer), resolve(value)), reject: (error) => (clearTimeout(timer), reject(error)) });
         });
     }
+}
+
+export function validateStoryContinuity(state: CanvasSnapshot | null, input: { nodeIds?: string[] }) {
+    const allNodes = state?.nodes || [];
+    const connections = state?.connections || [];
+    const nodes = allNodes.filter((node) => !input.nodeIds?.length || input.nodeIds.includes(node.id));
+    const issues = nodes.flatMap((node) => {
+        const metadata = node.metadata || {};
+        const result: Array<{ nodeId: string; type: string; issue: string; suggestedAction: string }> = [];
+        if (node.type === "manju:shot") {
+            if (!metadata.content) result.push({ nodeId: node.id, type: node.type, issue: "镜头缺少描述或提示词", suggestedAction: "调用 story_update_shot 补充镜头描述" });
+            if (!metadata.aspectRatio) result.push({ nodeId: node.id, type: node.type, issue: "镜头缺少画幅约束", suggestedAction: "继承剧集画幅并调用 story_update_shot 写入 aspectRatio" });
+            const incoming = connections.filter((connection) => connection.toNodeId === node.id).map((connection) => allNodes.find((item) => item.id === connection.fromNodeId)).filter(Boolean);
+            if (!incoming.some((item) => item?.type === "manju:scene" || item?.type === "manju:episode")) result.push({ nodeId: node.id, type: node.type, issue: "镜头未连接到场景或剧集", suggestedAction: "调用 canvas_connect_nodes 连接最近的 scene 或 episode 节点" });
+            if (!incoming.some((item) => item?.type === "manju:character")) result.push({ nodeId: node.id, type: node.type, issue: "镜头未关联角色设定", suggestedAction: "调用 canvas_connect_nodes 连接角色设定节点" });
+        }
+        if (node.type === "manju:character" && !metadata.content && !(metadata.references as unknown[])?.length) result.push({ nodeId: node.id, type: node.type, issue: "角色缺少外观描述或参考图", suggestedAction: "调用 story_create_characters 补充描述或参考图" });
+        if (node.type === "manju:scene" && !metadata.location) result.push({ nodeId: node.id, type: node.type, issue: "场景缺少地点信息", suggestedAction: "调用 story_create_scenes 或 canvas_update_node 补充 location" });
+        return result;
+    });
+    return { valid: issues.length === 0, checkedNodes: nodes.length, issues };
+}
+
+export function exportStoryEpisode(state: CanvasSnapshot | null, input: { episodeNodeId?: string; format?: string }) {
+    const nodes = state?.nodes || [];
+    const episode = input.episodeNodeId ? nodes.find((node) => node.id === input.episodeNodeId) : nodes.find((node) => node.type === "manju:episode");
+    const nodeIds = new Set(episode ? [episode.id] : []);
+    const connections = state?.connections || [];
+    let changed = true;
+    while (changed) {
+        changed = false;
+        connections.forEach((connection) => {
+            if (nodeIds.has(connection.fromNodeId) && !nodeIds.has(connection.toNodeId)) { nodeIds.add(connection.toNodeId); changed = true; }
+        });
+    }
+    const scopedNodes = nodes.filter((node) => nodeIds.has(node.id));
+    const shots = scopedNodes.filter((node) => node.type === "manju:shot").sort((a, b) => Number(a.metadata?.shotNumber || 0) - Number(b.metadata?.shotNumber || 0));
+    const issues: Array<{ nodeId?: string; type: string; message: string }> = [];
+    shots.forEach((shot) => {
+        const assets = scopedNodes.filter((node) => node.metadata?.sourceShotId === shot.id);
+        if (!assets.length) issues.push({ nodeId: shot.id, type: "missing-assets", message: "镜头缺少图片、视频或音频资产" });
+        assets.forEach((asset) => {
+            const status = String(asset.metadata?.generationStatus || asset.metadata?.status || "");
+            if (["queued", "running"].includes(status)) issues.push({ nodeId: asset.id, type: "generation-pending", message: "生成任务尚未完成" });
+            if (["failed", "error"].includes(status)) issues.push({ nodeId: asset.id, type: "generation-failed", message: "生成任务失败，需要重试" });
+        });
+        const review = String(shot.metadata?.reviewStatus || "");
+        if (review !== "approved") issues.push({ nodeId: shot.id, type: "review-required", message: "镜头尚未通过人工审核" });
+    });
+    let cursor = 0;
+    const timeline = shots.map((shot) => {
+        const durationSeconds = Math.max(0.1, Number(shot.metadata?.durationSeconds || 4));
+        const assets = scopedNodes.filter((node) => node.metadata?.sourceShotId === shot.id).map((node) => ({ nodeId: node.id, type: node.type, status: node.metadata?.generationStatus || node.metadata?.status || "unknown", url: node.metadata?.content || node.metadata?.url || undefined }));
+        const item = { shotId: shot.id, shotNumber: Number(shot.metadata?.shotNumber || 0), startSeconds: cursor, endSeconds: cursor + durationSeconds, durationSeconds, assets };
+        cursor += durationSeconds;
+        return item;
+    });
+    const manifest = { format: input.format || "manifest", projectId: state?.projectId, title: state?.title, aspectRatio: String(episode?.metadata?.aspectRatio || "16:9"), ready: issues.length === 0, issues, totalDurationSeconds: cursor, timeline, episode: episode || null, nodes: scopedNodes, connections: connections.filter((connection) => nodeIds.has(connection.fromNodeId) && nodeIds.has(connection.toNodeId)) };
+    return manifest;
+}
+
+export function getStoryProjectStatus(state: CanvasSnapshot | null, input: { episodeNodeId?: string }) {
+    const nodes = state?.nodes || [];
+    const episode = input.episodeNodeId ? nodes.find((node) => node.id === input.episodeNodeId) : nodes.find((node) => node.type === "manju:episode");
+    const scopedIds = new Set<string>(episode ? [episode.id] : nodes.filter((node) => node.type.startsWith("manju:")).map((node) => node.id));
+    const connections = state?.connections || [];
+    let changed = true;
+    while (changed) {
+        changed = false;
+        connections.forEach((connection) => {
+            if (scopedIds.has(connection.fromNodeId) && !scopedIds.has(connection.toNodeId)) { scopedIds.add(connection.toNodeId); changed = true; }
+        });
+    }
+    const scoped = nodes.filter((node) => scopedIds.has(node.id));
+    const shots = scoped.filter((node) => node.type === "manju:shot");
+    const assets = scoped.filter((node) => node.metadata?.sourceShotId);
+    const counts = {
+        episodes: scoped.filter((node) => node.type === "manju:episode").length,
+        scenes: scoped.filter((node) => node.type === "manju:scene").length,
+        characters: scoped.filter((node) => node.type === "manju:character").length,
+        shots: shots.length,
+        assets: assets.length,
+        approvedShots: shots.filter((node) => node.metadata?.reviewStatus === "approved").length,
+        completedAssets: assets.filter((node) => node.metadata?.generationStatus === "succeeded").length,
+        failedAssets: assets.filter((node) => node.metadata?.generationStatus === "failed").length,
+    };
+    return { projectId: state?.projectId, title: state?.title, episodeId: episode?.id, aspectRatio: episode?.metadata?.aspectRatio || "16:9", counts, readyForExport: counts.shots > 0 && counts.assets > 0 && counts.approvedShots === counts.shots && counts.completedAssets === counts.assets && counts.failedAssets === 0 };
 }
 
 /** 为运行中 turn 的可重放事件生成稳定键。 */

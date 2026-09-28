@@ -34,13 +34,24 @@ export function AgentConnectView({
 }) {
     const { t } = useTranslation();
     const { message } = App.useApp();
-    const steps = [{ title: t("agent.connect.pluginTitle"), text: t("agent.connect.pluginText") }, { title: t("agent.connect.directTitle"), text: t("agent.connect.directText"), command: "npx -y @basketikun/canvas-agent@latest" }];
+    const steps = [{ title: t("agent.connect.pluginTitle"), text: t("agent.connect.pluginText") }, { title: t("agent.connect.directTitle"), text: t("agent.connect.directText"), command: "npm run platform" }];
     const statusText = connectError ? t("agent.status.failed") : connected ? activity : enabled ? t("agent.status.connecting") : t("agent.status.disconnected");
     const statusColor = connectError ? "#dc2626" : connected ? "#16a34a" : enabled ? "#d97706" : theme.node.muted;
     const copyCommand = (command: string) => {
         copyToClipboard(command);
         message.success(t("agent.connect.commandCopied"));
     };
+    const mcpEndpoint = (() => {
+        try {
+            const parsed = new URL(url || "http://127.0.0.1:17371");
+            parsed.port = "8787";
+            parsed.pathname = "/mcp";
+            parsed.search = "";
+            return parsed.toString();
+        } catch {
+            return "http://127.0.0.1:8787/mcp";
+        }
+    })();
     const codexPluginReminder = (
         <div className="rounded-lg border px-3 py-2.5 text-xs leading-5" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
             <div className="font-medium" style={{ color: theme.node.text }}>
@@ -147,6 +158,21 @@ export function AgentConnectView({
                                 {connectError}
                             </div>
                         ) : null}
+                    </div>
+                </div>
+                <div className="rounded-lg border p-3" style={{ borderColor: theme.node.stroke }}>
+                    <div className="text-sm font-medium leading-5">Agent-neutral MCP</div>
+                    <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>
+                        Connect Claude, Gemini, DeepSeek Harness, Cursor, or an internal Agent through the same Streamable HTTP endpoint.
+                    </div>
+                    <div className="mt-2 flex items-center gap-2 rounded-md border px-2 py-1.5" style={{ borderColor: theme.node.stroke }}>
+                        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-[11px]">{mcpEndpoint}</code>
+                        <Tooltip title={t("agent.connect.copyCommand")}>
+                            <Button size="small" type="text" className="!h-6 !w-6 !min-w-6" icon={<Copy className="size-3.5" />} onClick={() => copyCommand(mcpEndpoint)} />
+                        </Tooltip>
+                    </div>
+                    <div className="mt-2 text-[11px] leading-5" style={{ color: theme.node.muted }}>
+                        Use the token above as <code>x-canvas-agent-token</code>. Start the gateway with <code>node dist/index.js mcp-http</code>.
                     </div>
                 </div>
             </div>

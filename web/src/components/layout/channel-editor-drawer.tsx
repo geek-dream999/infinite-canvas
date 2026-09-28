@@ -74,7 +74,12 @@ export function ChannelEditorDrawer({ open, channel, onSave, onClose }: { open: 
                     <Select className="w-full" value={draft.apiFormat} options={apiFormatOptions} onChange={changeApiFormat} />
                 </label>
                 <label className="block md:col-span-2">
-                    <span className="mb-1 block text-sm font-medium">{t("config.channelEditor.baseUrl")}</span>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{t("config.channelEditor.baseUrl")}</span>
+                        <Button size="small" onClick={() => patch({ name: "SuperToken", apiFormat: "openai", baseUrl: "https://api.supertoken.cc/v1" })}>
+                            使用 SuperToken
+                        </Button>
+                    </div>
                     <Input value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} placeholder="https://api.example.com" />
                 </label>
                 <label className="block md:col-span-2">

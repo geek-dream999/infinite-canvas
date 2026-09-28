@@ -15,8 +15,9 @@ description: 操作 Infinite Canvas 当前网页画布，读取节点、选区�
 - 创建生成内容优先用 `canvas_generate_text`、`canvas_generate_image`、`canvas_generate_video`、`canvas_generate_audio`。
 - 需要把提示词、配置和生成节点串成流程时，使用 `canvas_create_generation_flow` 或项目已有的流程工具。
 - 需要批量增删改、移动、连接节点或设置视口时，使用 `canvas_apply_ops`。
+- 用户要求下载图片时使用 `canvas_download_images`：当前选中图片用 `scope=selected`，全部分镜用 `scope=storyboard`，全部成功图片用 `scope=all_images`；需要精确控制时传 `nodeIds`。
 - 不要模拟鼠标点击，不要要求用户手动复制 JSON。
-- 写入画布的操作会由网页侧边栏做二次确认，按当前工具结果继续推进即可。
+- 写入画布和触发浏览器下载的操作会由网页侧边栏做二次确认，按当前工具结果继续推进即可。
 
 ## 风格
 

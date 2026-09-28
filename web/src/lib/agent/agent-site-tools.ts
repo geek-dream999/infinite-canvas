@@ -2,6 +2,7 @@ import type { NavigateFunction } from "react-router-dom";
 
 import i18n from "@/i18n";
 import { fetchPrompts } from "@/services/api/prompts";
+import { exportCanvasNodes } from "@/lib/canvas/canvas-export";
 import { uploadImage } from "@/services/image-storage";
 import { imageAspectOptions, imageQualityOptions, imageScaleOptions } from "@/components/image-settings-panel";
 import { videoResolutionOptions, videoSecondsRange, videoSizeOptions } from "@/components/video-settings-panel";
@@ -17,6 +18,7 @@ import { useWorkbenchAgentStore } from "@/stores/use-workbench-agent-store";
 
 export const SITE_TOOL_NAMES = [
     "canvas_list_projects",
+    "canvas_download_images",
     "generation_get_status",
     "workbench_image_get_config",
     "workbench_image_generate",
@@ -39,6 +41,7 @@ function siteText(key: string, options?: Record<string, unknown>) {
 
 export const SITE_TOOL_LABELS: Record<SiteToolName, string> = {
     get canvas_list_projects() { return siteText("canvasList"); },
+    get canvas_download_images() { return siteText("canvasDownloadImages"); },
     get generation_get_status() { return siteText("generationStatus"); },
     get workbench_image_get_config() { return siteText("imageConfig"); },
     get workbench_image_generate() { return siteText("imageGenerate"); },
@@ -58,6 +61,8 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
     switch (name) {
         case "canvas_list_projects":
             return listCanvasProjects(input);
+        case "canvas_download_images":
+            return downloadCanvasImages(input, context.canvasSnapshot);
         case "generation_get_status":
             return getGenerationStatus(input, context.canvasSnapshot);
         case "workbench_image_get_config":
@@ -77,6 +82,36 @@ export async function runSiteTool(name: SiteToolName, input: SiteToolInput, navi
         default:
             throw new Error(siteText("unknownTool", { name }));
     }
+}
+
+async function downloadCanvasImages(input: SiteToolInput, snapshot?: CanvasAgentSnapshot | null) {
+    if (!snapshot) throw new Error(siteText("openCanvasFirst"));
+    const requestedIds = new Set(Array.isArray(input.nodeIds) ? input.nodeIds.filter((id): id is string => typeof id === "string") : []);
+    const scope = input.scope === "storyboard" || input.scope === "all_images" ? input.scope : "selected";
+    const selectedIds = new Set(snapshot.selectedNodeIds);
+    const configByOutput = new Map(snapshot.connections.map((connection) => [connection.toNodeId, connection.fromNodeId]));
+    const nodesById = new Map(snapshot.nodes.map((node) => [node.id, node]));
+    const isSuccessfulImage = (node: CanvasAgentSnapshot["nodes"][number]) => node.type === "image" && node.metadata?.status === "success";
+    const isStoryboard = (node: CanvasAgentSnapshot["nodes"][number]) => {
+        const config = nodesById.get(configByOutput.get(node.id) || "");
+        return Boolean(config && /镜头\s*\d+.*关键帧/i.test(config.title || ""));
+    };
+    const matched = snapshot.nodes.filter((node) => {
+        if (!isSuccessfulImage(node)) return false;
+        if (requestedIds.size) return requestedIds.has(node.id);
+        if (scope === "all_images") return true;
+        if (scope === "storyboard") return isStoryboard(node);
+        return selectedIds.has(node.id);
+    });
+    if (!matched.length) throw new Error(siteText("noDownloadImages"));
+    const named = matched.map((node) => {
+        if (scope !== "storyboard") return node;
+        const config = nodesById.get(configByOutput.get(node.id) || "");
+        return { ...node, title: config?.title || node.title };
+    });
+    const fileName = String(input.fileName || (scope === "storyboard" ? `${snapshot.title}-分镜图` : `${snapshot.title}-图片`)).trim();
+    await exportCanvasNodes(named, fileName);
+    return { ok: true, count: named.length, nodeIds: named.map((node) => node.id), fileName: `${fileName}.zip` };
 }
 
 function getGenerationStatus(input: SiteToolInput, canvasSnapshot?: CanvasAgentSnapshot | null) {

@@ -4,11 +4,14 @@ import { useTranslation } from "react-i18next";
 import { requestEdit, requestGeneration, requestImageQuestion, type AiTextMessage } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
+import { createOpenAICompatibleGenerationProvider } from "@/services/api/generation-gateway";
 import { decodeChannelModel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 import { buildGenerationConfig } from "@/lib/canvas/canvas-generation-helpers";
 import { buildNodeContext } from "@/lib/canvas/plugin-node-context";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { ensurePluginsLoaded } from "@/lib/canvas/plugin-loader";
+import { registerNodeDefinitions } from "@/lib/canvas/node-registry";
+import { manjuPlugin } from "@/plugins/manju";
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { CanvasNodeToolbarItem, CanvasPluginAi, CanvasPluginHost } from "@/types/canvas-plugin";
 import type { ReferenceImage } from "@/types/image";
@@ -29,6 +32,12 @@ type PluginHostParams = {
     setDialogNodeId: Dispatch<SetStateAction<string | null>>;
     applyAgentOps: (ops?: CanvasAgentOp[]) => unknown;
 };
+
+// Register first-party production nodes synchronously. MCP can issue a canvas
+// operation as soon as the page bridge connects, before React effects flush.
+// Keeping this registration at module load prevents those nodes from falling
+// back to plain text nodes during that startup window.
+registerNodeDefinitions(manjuPlugin.nodes, manjuPlugin.id);
 
 /**
  * Plugin node host capabilities: expose host-side AI generation, canvas access, and panel controls
@@ -54,6 +63,12 @@ export function usePluginHost(params: PluginHostParams) {
                 const config = { ...buildGenerationConfig(effectiveConfig, undefined, "image"), count: String(options?.count || 1), ...(options?.model ? { model: options.model } : {}), ...(options?.size ? { size: options.size } : {}) };
                 ensureReady(config);
                 const references = toReferences(options?.references);
+                if (config.apiFormat === "openai") {
+                    const provider = createOpenAICompatibleGenerationProvider({ id: "configured-openai", baseUrl: config.baseUrl, apiKey: config.apiKey, models: { image: config.model } });
+                    const task = await provider.submit({ kind: "image", model: config.model, prompt, parameters: { count: config.count, size: config.size }, signal: options?.signal }, references);
+                    if (task.status === "failed") throw new Error(task.error || "Image generation failed");
+                    return { images: (task.result?.metadata?.images as string[] | undefined) || [] };
+                }
                 const items = references.length ? await requestEdit(config, prompt, references, { signal: options?.signal }) : await requestGeneration(config, prompt, { signal: options?.signal });
                 const images = await Promise.all(items.map(async (item) => {
                     try {
@@ -73,12 +88,25 @@ export function usePluginHost(params: PluginHostParams) {
                     ...(options?.seconds ? { videoSeconds: options.seconds } : {}),
                 };
                 ensureReady(config);
+                if (config.apiFormat === "openai") {
+                    const provider = createOpenAICompatibleGenerationProvider({ id: "configured-openai", baseUrl: config.baseUrl, apiKey: config.apiKey, models: { video: config.model } });
+                    const task = await provider.submit({ kind: "video", model: config.model, prompt, parameters: { seconds: config.videoSeconds, size: config.size, resolution: config.vquality, generate_audio: config.videoGenerateAudio, watermark: config.videoWatermark, mode: config.videoMode }, signal: options?.signal }, toReferences(options?.references));
+                    if (task.status === "failed" || !task.result?.url) throw new Error(task.error || "Video generation failed");
+                    const file = await storeGeneratedVideo({ url: task.result.url, mimeType: "video/mp4" });
+                    return { url: file.url, mimeType: file.mimeType, width: file.width, height: file.height, durationMs: file.durationMs };
+                }
                 const file = await storeGeneratedVideo(await requestVideoGeneration(config, prompt, toReferences(options?.references), { signal: options?.signal }));
                 return { url: file.url, mimeType: file.mimeType, width: file.width, height: file.height, durationMs: file.durationMs };
             },
             generateText: async (prompt, options) => {
                 const config = { ...buildGenerationConfig(effectiveConfig, undefined, "text"), ...(options?.model ? { model: options.model } : {}) };
                 ensureReady(config);
+                if (config.apiFormat === "openai") {
+                    const provider = createOpenAICompatibleGenerationProvider({ id: "configured-openai", baseUrl: config.baseUrl, apiKey: config.apiKey, models: { text: config.model } });
+                    const task = await provider.submit({ kind: "text", model: config.model, prompt, parameters: { systemPrompt: options?.system || "" }, signal: options?.signal });
+                    if (task.status === "failed") throw new Error(task.error || "Text generation failed");
+                    return { text: String(task.result?.metadata?.text || "") };
+                }
                 const messages: AiTextMessage[] = [...(options?.system ? [{ role: "system" as const, content: options.system }] : []), { role: "user" as const, content: prompt }];
                 const text = await requestImageQuestion(config, messages, (delta) => options?.onDelta?.(delta), { signal: options?.signal });
                 return { text };
