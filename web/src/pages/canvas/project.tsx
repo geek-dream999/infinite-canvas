@@ -48,7 +48,7 @@ import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useAgentBridge } from "@/pages/canvas/hooks/use-agent-bridge";
 import { usePluginHost } from "@/pages/canvas/hooks/use-plugin-host";
 import { buildNodeMentionReferences, getGroupResourceNodes, isCanvasReferenceNode, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
-import { exportCanvasProjects } from "@/lib/canvas/canvas-export";
+import { exportCanvasNodes, exportCanvasProjects, prepareCanvasImageDownloads } from "@/lib/canvas/canvas-export";
 import { applyNodeConfigPatch, audioMetadata, buildAudioGenerationMetadata, buildImageGenerationMetadata, createCanvasNode, imageMetadata, videoMetadata } from "@/lib/canvas/canvas-node-factory";
 import { applyGroupSelection, applyUngroupSelection, canGroupSelectedNodes, canUngroupSelectedNodes, collectGroupMemberNodes, findContainingGroupId, findGroupDropTarget, getConnectionTargetAnchor, getGroupWrapRect, normalizeConnection, snapNodesIntoGroup } from "@/lib/canvas/canvas-node-geometry";
 import {
@@ -1830,6 +1830,17 @@ function InfiniteCanvasPage() {
         saveAs(image.content, `canvas-image-${node.id}-${image.id}.${imageExtension(image.content)}`);
     }, []);
 
+    const downloadAllCanvasImages = useCallback(async () => {
+        const images = prepareCanvasImageDownloads(nodesRef.current, connectionsRef.current);
+        if (!images.length) return void message.warning(t("canvas.toolbar.noImagesToDownload"));
+        try {
+            await exportCanvasNodes(images, `${currentProject?.title || t("canvas.projectPage.untitledCanvas")}-全部图片`);
+            message.success(t("canvas.toolbar.downloadedImages", { count: images.length }));
+        } catch {
+            message.error(t("canvas.toolbar.downloadImagesFailed"));
+        }
+    }, [currentProject?.title, message, t]);
+
     const captureVideoNodeFrame = useCallback(
         async (nodeId: string, position: VideoFramePosition) => {
             setContextMenu(null);
@@ -3358,6 +3369,7 @@ function InfiniteCanvasPage() {
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onUpload={() => handleUploadRequest()}
+                    onDownloadAll={() => void downloadAllCanvasImages()}
                     onDelete={() => deleteNodes(new Set(selectedNodeIds))}
                     onClear={() => setClearConfirmOpen(true)}
                     onCanvasToolChange={setCanvasTool}

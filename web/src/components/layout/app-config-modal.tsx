@@ -14,9 +14,9 @@ import { exportAppConfig, importAppConfig } from "@/services/config-file";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { createModelChannel, modelOptionsFromChannels, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel } from "@/stores/use-config-store";
+import { createModelChannel, modelOptionsFromChannels, normalizeChannelModels, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, type AiConfig, type ApiCallFormat, type ConfigTabKey, type ModelCapability, type ModelChannel, type ModelGroup } from "@/stores/use-config-store";
 
-type ModelGroup = {
+type DefaultModelGroup = {
     capability: ModelCapability;
     modelKey: "imageModel" | "videoModel" | "textModel" | "audioModel";
     labelKey: string;
@@ -29,7 +29,7 @@ type WebdavDomainProgress = {
     status?: "active" | "success" | "exception";
 };
 
-const modelGroups: ModelGroup[] = [
+const modelGroups: DefaultModelGroup[] = [
     { capability: "image", modelKey: "imageModel", labelKey: "config.preferences.defaultImageModel" },
     { capability: "video", modelKey: "videoModel", labelKey: "config.preferences.defaultVideoModel" },
     { capability: "text", modelKey: "textModel", labelKey: "config.preferences.defaultTextModel" },
@@ -57,6 +57,8 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     const [syncingWebdav, setSyncingWebdav] = useState(false);
     const [webdavSyncStatus, setWebdavSyncStatus] = useState("");
     const [webdavDomainProgress, setWebdavDomainProgress] = useState(createWebdavDomainProgress);
+    const [groupName, setGroupName] = useState("");
+    const [groupModels, setGroupModels] = useState("");
     const config = useConfigStore((state) => state.config);
     const webdav = useConfigStore((state) => state.webdav);
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -93,6 +95,14 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
     };
 
     const updateChannels = (channels: ModelChannel[]) => saveConfig(withChannels(config, channels));
+    const addModelGroup = () => {
+        const name = groupName.trim();
+        const models = normalizeChannelModels(groupModels.split(/[\n,，]+/));
+        if (!name || !models.length) return;
+        saveConfig({ ...config, modelGroups: [...config.modelGroups, { id: crypto.randomUUID(), name, models }] });
+        setGroupName(""); setGroupModels("");
+    };
+    const deleteModelGroup = (id: string) => saveConfig({ ...config, modelGroups: config.modelGroups.filter((group) => group.id !== id) });
 
     const addChannel = () => {
         const channel = createModelChannel({ name: t("config.channels.numberedName", { count: config.channels.length + 1 }) });
@@ -208,6 +218,18 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                                             </div>
                                         </div>
                                     ))}
+                                </div>
+                                <div className="mt-6 rounded-lg border border-stone-200 p-4 dark:border-stone-800">
+                                    <div className="mb-1 text-sm font-semibold">{t("config.modelGroups.title")}</div>
+                                    <div className="mb-3 text-xs text-stone-500">{t("config.modelGroups.description")}</div>
+                                    <div className="grid gap-2 md:grid-cols-[180px_1fr_auto]">
+                                        <Input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder={t("config.modelGroups.name")} />
+                                        <Input value={groupModels} onChange={(event) => setGroupModels(event.target.value)} placeholder={t("config.modelGroups.models")} />
+                                        <Button onClick={addModelGroup}>{t("config.modelGroups.add")}</Button>
+                                    </div>
+                                    <div className="mt-3 space-y-2">
+                                        {config.modelGroups.map((group) => <div key={group.id} className="flex items-center justify-between gap-3 text-sm"><span className="truncate">{group.name} · {t("config.channels.modelCount", { count: group.models.length })}</span><Button size="small" danger type="text" icon={<Trash2 className="size-3.5" />} onClick={() => deleteModelGroup(group.id)} /></div>)}
+                                    </div>
                                 </div>
                             </div>
                         ),
@@ -332,7 +354,7 @@ export function AppConfigPanel({ showDoneButton = false, initialTab = "channels"
                     </Button>
                 </div>
             ) : null}
-            <ChannelEditorDrawer open={Boolean(editingChannel)} channel={editingChannel} onSave={saveChannel} onClose={() => setEditingChannelId("")} />
+            <ChannelEditorDrawer open={Boolean(editingChannel)} channel={editingChannel} modelGroups={config.modelGroups} onSave={saveChannel} onClose={() => setEditingChannelId("")} />
         </>
     );
 }

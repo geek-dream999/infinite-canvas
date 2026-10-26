@@ -253,7 +253,7 @@ export default {
         openAgent: "Open local Codex panel",
         nodeTypes: { image: "Image", text: "Text", config: "Generation config", video: "Video", audio: "Audio", group: "Group" },
         toolbar: {
-            select: "Select", pan: "Move", text: "Text", image: "Image", video: "Video", audio: "Audio", config: "Generation config", group: "Group", extensions: "Extension nodes", upload: "Upload assets", appearance: "Canvas appearance", clear: "Clear canvas",
+            select: "Select", pan: "Move", text: "Text", image: "Image", video: "Video", audio: "Audio", config: "Generation config", group: "Group", extensions: "Extension nodes", upload: "Upload assets", downloadAll: "Download all images", noImagesToDownload: "There are no successful images to download", downloadedImages: "Downloaded {{count}} images", downloadImagesFailed: "Batch download failed. Try again.", appearance: "Canvas appearance", clear: "Clear canvas",
             themeMode: "Theme", light: "Light", dark: "Dark", gridStyle: "Grid style", dots: "Dots", lines: "Lines", blank: "Blank", imageInfo: "Image info",
         },
         project: {
@@ -490,6 +490,14 @@ export default {
             newName: "New provider",
             indexedName: "Provider {{index}}",
         },
+        modelGroups: {
+            title: "Model groups",
+            description: "Save commonly used model sets and add a whole set when creating a provider. Capabilities can still be adjusted per provider.",
+            name: "Group name",
+            models: "Model names (comma or newline separated)",
+            add: "Add model group",
+            unnamed: "Model group {{index}}",
+        },
         preferences: {
             interface: "Interface",
             language: "Display language",
@@ -518,6 +526,7 @@ export default {
             models: "Provider models",
             modelDescription: "{{count}} selected; assign a capability to each model and optionally customize its request script.",
             selectModels: "Select models",
+            selectGroups: "Select model groups",
             scriptReady: "Script set",
             script: "Request script",
             empty: "Select models to fetch or manually add models.",

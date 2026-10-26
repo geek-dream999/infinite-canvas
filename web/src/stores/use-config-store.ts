@@ -24,12 +24,19 @@ export type ModelChannel = {
     models: ChannelModel[];
 };
 
+export type ModelGroup = {
+    id: string;
+    name: string;
+    models: ChannelModel[];
+};
+
 export type AiConfig = {
     channelMode: "remote" | "local";
     baseUrl: string;
     apiKey: string;
     apiFormat: ApiCallFormat;
     channels: ModelChannel[];
+    modelGroups: ModelGroup[];
     model: string;
     imageModel: string;
     videoModel: string;
@@ -97,6 +104,7 @@ export const defaultConfig: AiConfig = {
             ],
         },
     ],
+    modelGroups: [],
     model: "default::gpt-image-2",
     imageModel: "default::gpt-image-2",
     videoModel: "default::grok-imagine-video",
@@ -246,6 +254,7 @@ export const useConfigStore = create<ConfigStore>()(
                 const config = { ...defaultConfig, ...persistedConfig };
                 if (!Array.isArray(persistedConfig.channels)) config.channels = [];
                 const channels = normalizeChannels(config);
+                const modelGroups = normalizeModelGroups(config.modelGroups);
                 const models = modelOptionsFromChannels(channels);
                 return {
                     ...current,
@@ -255,6 +264,7 @@ export const useConfigStore = create<ConfigStore>()(
                         channelMode: "local",
                         apiFormat: normalizeApiFormat(config.apiFormat),
                         channels,
+                        modelGroups,
                         models,
                         imageModel: normalizeModelOptionValue(config.imageModel || config.model, channels),
                         videoModel: normalizeModelOptionValue(config.videoModel, channels),
@@ -298,6 +308,14 @@ export function normalizeChannelModels(models: Array<string | ChannelModel> | un
         result.push({ name, capability, script });
     }
     return result;
+}
+
+export function normalizeModelGroups(groups: Array<Partial<ModelGroup>> | undefined): ModelGroup[] {
+    return (groups || []).map((group, index) => ({
+        id: group.id?.trim() || `model-group-${index + 1}`,
+        name: group.name?.trim() || i18n.t("config.modelGroups.unnamed", { index: index + 1 }),
+        models: normalizeChannelModels(group.models),
+    })).filter((group) => group.models.length > 0 || group.name.trim());
 }
 
 export function createModelChannel(channel?: Partial<ModelChannel>): ModelChannel {

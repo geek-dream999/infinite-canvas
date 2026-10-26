@@ -2,7 +2,7 @@ import type { NavigateFunction } from "react-router-dom";
 
 import i18n from "@/i18n";
 import { fetchPrompts } from "@/services/api/prompts";
-import { exportCanvasNodes } from "@/lib/canvas/canvas-export";
+import { exportCanvasNodes, prepareCanvasImageDownloads } from "@/lib/canvas/canvas-export";
 import { uploadImage } from "@/services/image-storage";
 import { imageAspectOptions, imageQualityOptions, imageScaleOptions } from "@/components/image-settings-panel";
 import { videoResolutionOptions, videoSecondsRange, videoSizeOptions } from "@/components/video-settings-panel";
@@ -89,13 +89,10 @@ async function downloadCanvasImages(input: SiteToolInput, snapshot?: CanvasAgent
     const requestedIds = new Set(Array.isArray(input.nodeIds) ? input.nodeIds.filter((id): id is string => typeof id === "string") : []);
     const scope = input.scope === "storyboard" || input.scope === "all_images" ? input.scope : "selected";
     const selectedIds = new Set(snapshot.selectedNodeIds);
-    const configByOutput = new Map(snapshot.connections.map((connection) => [connection.toNodeId, connection.fromNodeId]));
-    const nodesById = new Map(snapshot.nodes.map((node) => [node.id, node]));
     const isSuccessfulImage = (node: CanvasAgentSnapshot["nodes"][number]) => node.type === "image" && node.metadata?.status === "success";
-    const isStoryboard = (node: CanvasAgentSnapshot["nodes"][number]) => {
-        const config = nodesById.get(configByOutput.get(node.id) || "");
-        return Boolean(config && /镜头\s*\d+.*关键帧/i.test(config.title || ""));
-    };
+    const prepared = prepareCanvasImageDownloads(snapshot.nodes, snapshot.connections);
+    const preparedById = new Map(prepared.map((node) => [node.id, node]));
+    const isStoryboard = (node: CanvasAgentSnapshot["nodes"][number]) => /^镜头\d+$/.test(preparedById.get(node.id)?.title || "");
     const matched = snapshot.nodes.filter((node) => {
         if (!isSuccessfulImage(node)) return false;
         if (requestedIds.size) return requestedIds.has(node.id);
@@ -104,11 +101,8 @@ async function downloadCanvasImages(input: SiteToolInput, snapshot?: CanvasAgent
         return selectedIds.has(node.id);
     });
     if (!matched.length) throw new Error(siteText("noDownloadImages"));
-    const named = matched.map((node) => {
-        if (scope !== "storyboard") return node;
-        const config = nodesById.get(configByOutput.get(node.id) || "");
-        return { ...node, title: config?.title || node.title };
-    });
+    const matchedIds = new Set(matched.map((node) => node.id));
+    const named = prepared.filter((node) => matchedIds.has(node.id));
     const fileName = String(input.fileName || (scope === "storyboard" ? `${snapshot.title}-分镜图` : `${snapshot.title}-图片`)).trim();
     await exportCanvasNodes(named, fileName);
     return { ok: true, count: named.length, nodeIds: named.map((node) => node.id), fileName: `${fileName}.zip` };

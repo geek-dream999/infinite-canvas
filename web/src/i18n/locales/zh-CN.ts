@@ -253,7 +253,7 @@ export default {
         openAgent: "打开本地 Codex 面板",
         nodeTypes: { image: "图片", text: "文本", config: "生成配置", video: "视频", audio: "音频", group: "组" },
         toolbar: {
-            select: "选择", pan: "移动", text: "文本", image: "图片", video: "视频", audio: "音频", config: "生成配置", group: "组", extensions: "扩展节点", upload: "上传资产", appearance: "画布外观", clear: "清空画布",
+            select: "选择", pan: "移动", text: "文本", image: "图片", video: "视频", audio: "音频", config: "生成配置", group: "组", extensions: "扩展节点", upload: "上传资产", downloadAll: "批量下载图片", noImagesToDownload: "画布中没有可下载的成功图片", downloadedImages: "已下载 {{count}} 张图片", downloadImagesFailed: "批量下载失败，请重试", appearance: "画布外观", clear: "清空画布",
             themeMode: "主题模式", light: "浅色", dark: "深色", gridStyle: "网格样式", dots: "点", lines: "线", blank: "空白", imageInfo: "图片信息",
         },
         project: {
@@ -490,6 +490,14 @@ export default {
             newName: "新渠道",
             indexedName: "渠道 {{index}}",
         },
+        modelGroups: {
+            title: "模型组",
+            description: "预先保存常用模型集合，新增渠道时可一次性加入整组模型。模型能力仍可在渠道内调整。",
+            name: "模型组名称",
+            models: "模型名称（逗号或换行分隔）",
+            add: "新增模型组",
+            unnamed: "模型组 {{index}}",
+        },
         preferences: {
             interface: "界面偏好",
             language: "界面语言",
@@ -518,6 +526,7 @@ export default {
             models: "渠道模型",
             modelDescription: "已选 {{count}} 个；为每个模型指定能力并可自定义调用脚本。",
             selectModels: "选择模型",
+            selectGroups: "选择模型组",
             scriptReady: "脚本已设",
             script: "调用脚本",
             empty: "点击「选择模型」拉取或手动增加模型。",
